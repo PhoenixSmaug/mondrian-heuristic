@@ -26,15 +26,45 @@ We can then apply a given rectangle partition to the $[0, 1] \times [0, 1]$ squa
 
 For a given $n$, we can then simply try to apply all of the cached $[0, 1] \times [0, 1]$ partitions by scaling them up and then rounding their internal wall coordinates to integers. The search space given by rounding up or down is then explored locally in `src/csp.jl`.
 
+### Prime rectangulations (OEIS A340984)
+
+Slicing trees, quilt substitutions and (to a lesser extent) electrical duals all tend to produce partitions that *factor*: some sub-collection of the rectangles has a rectangular union, so the partition is really a smaller partition with a block substituted into it. A partition where that never happens — no sub-collection of $2 \ldots k-1$ rectangles tiles a rectangle, so in particular no two rectangles share a complete face — is called **prime**, and those are counted by [A340984](https://oeis.org/A340984): $1, 1, 0, 0, 1, 0, 2, 6, 29, 119, 600, 3050, 16095, 87549$ cross-free classes for $k = 1 \ldots 14$. Prime partitions are exactly the ones the other generators cannot reach by construction, which makes them the natural missing seed family, and they matter for the Mondrian problem specifically: a shared face means two rectangles whose side lengths are locked together, which is precisely the rigidity a low-defect solution wants to avoid.
+
+`data/import/a340984/` holds the complete catalogue of every class up to $k = 14$, taken from the [OEIS_A340984](https://github.com/PhoenixSmaug/OEIS_A340984) representative files. `src/io.jl` ingests them (`parse_a340984`), anisotropically normalizing each integer drawing onto $[0, 1]^2$; `src/prime.jl` can test any floorplan for primality (`is_prime_rectangulation`) and grow new ones.
+
+Above $k = 14$ there is no catalogue, so `src/prime.jl` generates them. Splitting one rectangle of a prime partition in two always creates a block, so the split is followed by a short random walk of T-flips, re-equalizing after each move, until the block is gone; roughly 6% of attempts land on a prime partition with one more rectangle. Feeding each generated level back in as the parent pool for the next climbs the ladder as far as you like:
+
+```bash
+julia -t auto mondrian.jl gen-prime --kmax 20 --per-k 25000
+```
+
+On 12 threads that takes about 9 minutes and produces **253,446 prime classes** — the 107,452 complete ones through $k = 14$ plus 145,994 generated ones for $k = 15 \ldots 20$, de-duplicated up to the dihedral group of the square:
+
+| $k$ | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|
+| classes | 20,994 | 25,000 | 25,000 | 25,000 | 25,000 | 25,000 |
+| rate | 335/s | 337/s | 309/s | 260/s | 273/s | 218/s |
+
+The generated levels are a diverse sample, not an exhaustive enumeration — $a(15)$ alone is around half a million. The result is saved to `data/import/prime_generated.cache` and picked up automatically by `init-cache`, which uses the prime partitions in three places: as seeds for their own T-flip/wall-slide expansion, as substitution blocks for the quilt engine (the pinwheel and its relatives can *only* enter a larger partition by substitution), and as outer root templates for the hierarchical search.
+
+Adding `--jsonl <dir>` also writes the generated partitions out in the catalogue's own schema, one `generated_nK.jsonl` per piece count, snapped onto the integer grid of their wall coordinates (`data/import/prime_generated_jsonl/`). Those files can be drawn with the catalogue's `render.py` exactly like the original representatives.
+
 The crucial new idea over Ed's previous method is to use a two-level hierarchy of rectangles. So if you have a look at the solution for $n = 2000$ above, you'll notice that it is actually a partition of just $13$ big rectangles, each of which is split into $13$ smaller rectangles. As implemented in `src/solver.jl`, this two step optimization makes a search even with a lot of rectangles feasible. So while Ed's solution never used more than 27 rectangles, larger $n$ seems to benefit immensely from this increased number of rectangles.
 
 
 ### How to use the solver
 
-Before running the solver for the first time, we need to built the cache of suitable rectangle partitions. With default options it takes around 15s of runtime and results in 80MB of data.
+Before running the solver for the first time, we need to built the cache of suitable rectangle partitions. With default options it takes around 45s of runtime and results in 115MB of data.
 ```bash
 julia mondrian.jl init-cache
 ```
+
+That uses the complete A340984 catalogue shipped in `data/import/a340984/`. To also seed it with prime partitions above $k = 14$, run the generator first — `init-cache` then finds `data/import/prime_generated.cache` on its own:
+```bash
+julia -t auto mondrian.jl gen-prime
+```
+
+Useful `init-cache` switches: `--prime-per-k <NUM>` caps how many prime classes are taken per piece count (`0` for all of them), `--expand-prime <NUM>` sets the expansion target per piece count, and `--no-prime` reproduces the old cache without them.
 
 Afterwards, finding a heuristic solution for a given $n$, for example $213$ is just:
 ```bash

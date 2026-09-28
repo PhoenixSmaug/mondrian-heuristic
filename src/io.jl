@@ -108,6 +108,156 @@ function parse_oeis_quilts(path::String; max_n::Int=96)::Vector{Floorplan}
 end
 
 """
+    floorplan_from_box(raw_rects, w, h; id="unnamed") -> Floorplan
+
+Normalize integer rectangles tiling a `w × h` box into a unit `Floorplan`.
+Unlike `floorplan_from_solution` the two axes are scaled independently, so
+non-square source boxes are supported.
+"""
+function floorplan_from_box(raw_rects, w::Real, h::Real; id::String="unnamed")::Floorplan
+    sx, sy = Float64(w), Float64(h)
+    (sx > 0 && sy > 0) || error("degenerate box: $(w) × $(h)")
+    rects = [(Float64(r[1]) / sx, Float64(r[2]) / sy,
+              Float64(r[3]) / sx, Float64(r[4]) / sy) for r in raw_rects]
+    sort!(rects)
+    return Floorplan(id, rects)
+end
+
+"""
+    reservoir_sample_lines(path, cap, rng; skip) -> Vector{String}
+
+Uniformly sample at most `cap` non-skipped lines of `path` in a single streaming
+pass, so that multi-gigabyte enumeration files never have to be held in memory.
+"""
+function reservoir_sample_lines(path::String, cap::Int, rng::AbstractRNG;
+                                skip::Function = _ -> false)::Vector{String}
+    cap <= 0 && return String[]
+    kept = String[]
+    seen = 0
+    for line in eachline(path)
+        (isempty(line) || skip(line)) && continue
+        seen += 1
+        if length(kept) < cap
+            push!(kept, line)
+        else
+            j = rand(rng, 1:seen)
+            j <= cap && (kept[j] = line)
+        end
+    end
+    return kept
+end
+
+"""
+    parse_a340984(path; k_range=5:18, max_per_k=typemax(Int), include_crossed=false, rng)
+
+Ingest the prime rectangulations catalogued by OEIS
+[A340984](https://oeis.org/A340984) as unit `Floorplan`s.
+
+`path` is either a directory holding `representatives_nK.jsonl` /
+`generated_nK.jsonl` files or a single such file. Every record is one D4
+equivalence class of a tiling in which no proper sub-collection of 2 .. k-1
+rectangles forms a rectangle; in particular no two rectangles share a complete
+face. These are exactly the topologies that cannot be assembled by gluing
+smaller rectangulations, which makes them a natural complement to the slicing,
+electrical and quilt seeds.
+
+`max_per_k` caps (by uniform reservoir sampling) how many classes are taken per
+piece count, since a(13) = 16143 and a(14) = 88112; pass `0` for no cap. Records
+flagged `crossed` (four rectangles meeting at a point) have fewer than `k - 1`
+wall segments and therefore admit no equal-area realization; they are dropped
+unless `include_crossed` is set.
+"""
+function parse_a340984(path::String;
+                       k_range::AbstractUnitRange{Int} = 5:18,
+                       max_per_k::Int = typemax(Int),
+                       include_crossed::Bool = false,
+                       rng::AbstractRNG = Random.default_rng())::Vector{Floorplan}
+    max_per_k <= 0 && (max_per_k = typemax(Int))
+    files = String[]
+    if isdir(path)
+        for name in sort(readdir(path))
+            m = match(r"^(?:representatives|generated)_n(\d+)\.jsonl$", name)
+            m === nothing && continue
+            parse(Int, m.captures[1]) in k_range && push!(files, joinpath(path, name))
+        end
+        isempty(files) && return Floorplan[]
+    elseif isfile(path)
+        push!(files, path)
+    else
+        error("A340984 source not found: $path")
+    end
+
+    # Cheap textual pre-filter for the reservoir; the parsed record is re-checked
+    # below so a reformatted source can never smuggle a crossed tiling through.
+    skip_crossed = include_crossed ? (_ -> false) : (l -> occursin("\"crossed\":true", l))
+
+    floorplans = Floorplan[]
+    for file in files
+        for line in reservoir_sample_lines(file, max_per_k, rng; skip=skip_crossed)
+            rec = try
+                JSON3.read(line)
+            catch
+                continue
+            end
+            (!include_crossed && get(rec, :crossed, false)) && continue
+            (haskey(rec, :rectangles) && haskey(rec, :width) && haskey(rec, :height)) || continue
+
+            raw = rec.rectangles
+            length(raw) in k_range || continue
+            id = haskey(rec, :class_id) ? "prime_$(rec.class_id)" :
+                 "prime_k$(length(raw))_$(length(floorplans) + 1)"
+
+            fp = floorplan_from_box(raw, rec.width, rec.height; id=id)
+            is_valid(fp) && push!(floorplans, fp)
+        end
+    end
+
+    sort!(floorplans, by=fp -> (length(fp), fp.id))
+    return floorplans
+end
+
+
+"""
+    save_a340984_jsonl(dir, library; prefix="generated") -> Vector{String}
+
+Write `library` back out in the A340984 representative schema, one
+`<prefix>_nK.jsonl` file per piece count, using each floorplan's grid drawing.
+The files are readable by the catalogue's own `render.py`. Returns the paths
+written.
+"""
+function save_a340984_jsonl(dir::String, library::Vector{Floorplan};
+                            prefix::String="generated")::Vector{String}
+    mkpath(dir)
+    by_k = Dict{Int, Vector{Floorplan}}()
+    for fp in library
+        push!(get!(by_k, length(fp), Floorplan[]), fp)
+    end
+
+    written = String[]
+    for k in sort(collect(keys(by_k)))
+        path = joinpath(dir, "$(prefix)_n$(k).jsonl")
+        open(path, "w") do io
+            for (i, fp) in enumerate(by_k[k])
+                w, h, drawn = grid_drawing(fp)
+                JSON3.write(io, (schema = "A340984-generated-v1",
+                                 class_id = "GEN-$k-$(lpad(i, 6, '0'))",
+                                 n = k,
+                                 crossed = false,
+                                 width = w,
+                                 height = h,
+                                 rectangles = [[r[1], r[2], r[3], r[4]] for r in drawn],
+                                 source = (generator = "mondrian.jl gen-prime",
+                                           method = "split-and-repair",
+                                           id = fp.id)))
+                println(io)
+            end
+        end
+        push!(written, path)
+    end
+    return written
+end
+
+"""
     save_library(path::String, library::Vector{Floorplan})
 
 Save a floorplan library to JSON (`.json`) or binary cache (`.cache` / `.jls`).

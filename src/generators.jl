@@ -282,14 +282,14 @@ end
 # ─── 3. Full-Scale Cache Expansion Engines ───────────────────────────────────
 
 """
-    expand_electrical_portfolio(base_by_k, target_per_k; rng) -> Vector{Floorplan}
+    expand_portfolio_by_k(base_by_k, target_per_k; rng) -> Vector{Floorplan}
 
-Expand base electrical dual topologies up to `target_per_k` (e.g. 20,000)
-per piece count k using T-flips and wall slides.
+Expand base topologies up to `target_per_k` (e.g. 20,000) per piece count k
+using T-flips and wall slides.
 """
-function expand_electrical_portfolio(base_by_k::Dict{Int, Vector{Floorplan}}, target_per_k::Int;
-                                     rng::AbstractRNG=Random.default_rng(),
-                                     on_step=nothing)::Vector{Floorplan}
+function expand_portfolio_by_k(base_by_k::Dict{Int, Vector{Floorplan}}, target_per_k::Int;
+                               rng::AbstractRNG=Random.default_rng(),
+                               on_step=nothing)::Vector{Floorplan}
     expanded = Floorplan[]
     for k in sort(collect(keys(base_by_k)))
         base = base_by_k[k]
@@ -342,19 +342,78 @@ function expand_electrical_portfolio(base_by_k::Dict{Int, Vector{Floorplan}}, ta
 end
 
 """
+    expand_electrical_portfolio(base_by_k, target_per_k; rng) -> Vector{Floorplan}
+
+Expand base electrical dual topologies with T-flips and wall slides.
+"""
+expand_electrical_portfolio(base_by_k::Dict{Int, Vector{Floorplan}}, target_per_k::Int;
+                            rng::AbstractRNG=Random.default_rng(), on_step=nothing) =
+    expand_portfolio_by_k(base_by_k, target_per_k; rng=rng, on_step=on_step)
+
+"""
+    generate_prime_portfolio(prime_fps, target_per_k; k_range=8:16, rng) -> Vector{Floorplan}
+
+Expand the prime (A340984) seeds returned by `parse_a340984`. Each seed is first
+continued to its equal-area realization, then the piece-count classes are grown
+with the same T-flip and wall-slide engine used for the electrical duals. Seeds
+that admit no equal-area realization are dropped, and the equalized seeds
+themselves are kept at the head of their class.
+"""
+function generate_prime_portfolio(prime_fps::Vector{Floorplan}, target_per_k::Int;
+                                  k_range::AbstractUnitRange{Int}=8:16,
+                                  rng::AbstractRNG=Random.default_rng(),
+                                  on_step=nothing)::Vector{Floorplan}
+    base_by_k = Dict{Int, Vector{Floorplan}}()
+    for fp in prime_fps
+        length(fp) in k_range || continue
+        eq = equalize(fp)
+        eq === nothing && continue
+        push!(get!(base_by_k, length(fp), Floorplan[]), eq)
+    end
+    isempty(base_by_k) && return Floorplan[]
+    return expand_portfolio_by_k(base_by_k, target_per_k; rng=rng, on_step=on_step)
+end
+
+"""Merge priority lists round-robin so a capped prefix keeps entries of every kind."""
+function interleave(lists::Vector{T}...)::Vector{T} where {T}
+    out = T[]
+    isempty(lists) && return out
+    for i in 1:maximum(length, lists), l in lists
+        i <= length(l) && push!(out, l[i])
+    end
+    return out
+end
+
+"""
     generate_quilt_portfolio(small_fps, target_count; mink=10, maxk=18, rng) -> Vector{Floorplan}
 
 Multi-level quilt expansion using dihedral block substitutions, T-flips, and
 wall slides on `oeis_solutions.txt` seeds.
+
+`extra_blocks` are additional small floorplans (2 .. 8 pieces) offered as
+substitution replacements, interleaved with the `small_fps` ones so that the
+`blocks_per_m` shortlist keeps both kinds. Feeding the small prime seeds of
+A340984 in here is what makes pinwheel-style substitutions reachable.
 """
 function generate_quilt_portfolio(small_fps::Vector{Floorplan}, target_count::Int;
                                   mink::Int=10, maxk::Int=18,
+                                  extra_blocks::Vector{Floorplan}=Floorplan[],
+                                  blocks_per_m::Int=3,
                                   rng::AbstractRNG=Random.default_rng(),
                                   on_step=nothing)::Vector{Floorplan}
     libraries_by_m = Dict{Int, Vector{Floorplan}}()
     for fp in small_fps
         m = length(fp)
         2 <= m <= 8 && push!(get!(libraries_by_m, m, Floorplan[]), fp)
+    end
+
+    extras_by_m = Dict{Int, Vector{Floorplan}}()
+    for fp in extra_blocks
+        m = length(fp)
+        2 <= m <= 8 && push!(get!(extras_by_m, m, Floorplan[]), fp)
+    end
+    for (m, extras) in extras_by_m
+        libraries_by_m[m] = interleave(extras, get(libraries_by_m, m, Floorplan[]))
     end
 
     base = [fp for fp in small_fps if mink <= length(fp) <= maxk]
@@ -407,7 +466,7 @@ function generate_quilt_portfolio(small_fps::Vector{Floorplan}, target_count::In
             for (ids, box) in blocks
                 m = length(ids)
                 haskey(libraries_by_m, m) || continue
-                for repl in libraries_by_m[m][1:min(length(libraries_by_m[m]), 3)]
+                for repl in libraries_by_m[m][1:min(length(libraries_by_m[m]), blocks_per_m)]
                     sym = rand(rng, 0:7)
                     cand = substitute_block(parent, ids, box, repl, sym)
                     cand === nothing && continue

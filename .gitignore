@@ -1,0 +1,9 @@
+# Generated or downloaded data -- too large for git (see README, "Data").
+data/cache/
+data/import/a340984/
+data/import/prime_generated.cache
+data/import/prime_generated_jsonl/
+# Build artefacts
+enum/enum_prime
+enum/enum_prime.exe
+__pycache__/
