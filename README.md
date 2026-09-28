@@ -52,6 +52,25 @@ Adding `--jsonl <dir>` also writes the generated partitions out in the catalogue
 The crucial new idea over Ed's previous method is to use a two-level hierarchy of rectangles. So if you have a look at the solution for $n = 2000$ above, you'll notice that it is actually a partition of just $13$ big rectangles, each of which is split into $13$ smaller rectangles. As implemented in `src/solver.jl`, this two step optimization makes a search even with a lot of rectangles feasible. So while Ed's solution never used more than 27 rectangles, larger $n$ seems to benefit immensely from this increased number of rectangles.
 
 
+### An evolved decision layer
+
+Everything in `src/solver.jl` is a decision *about* the machinery above — which hierarchy shapes (R outer rectangles, each split into M inner ones) to try, which outer roots and rounding masks to spend CSP calls on, and how to share the budget between them. That layer was evolved with [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve), an LLM-driven program-evolution loop with Claude writing the proposals. Each candidate was scored as $50 \times \text{mean}(d_{\text{best known}} / d_{\text{found}})$ over 30 values of $n$ in $300 \ldots 3000$, so 50 means matching the best-known value everywhere, and the winners were then re-scored on 50 *disjoint* held-out $n$ they had never been tuned on. Everything below `solver.jl` — the Newton equalizer, the CSP, the corpus, the validator — was left untouched.
+
+Two of the evolved programs are kept, because they are architecturally different and win on different $n$. They share all of their machinery and differ only in the scheduler that spends the budget:
+
+| `--schedule` | how the budget is spent | evolution set | held-out 50 |
+|---|---|---|---|
+| `bandit` (default) | successive halving over resumable $(R, M)$ arms, with new lattice-neighbour arms folded into the halving rounds as the pool narrows | 55.95 | 55.23, beats best-known on 47 of 50 |
+| `race` | successive halving down to one survivor, then widening to neighbours only once the pool has exhausted its own roots | 55.50 | — |
+| `best` | runs both and keeps the lower defect (twice the time) | | |
+
+Evolution started from an earlier decision layer that already chose shapes from a window around a fitted piece-count law, about $2.895\,n^{0.472}$ rectangles, ranked outer roots by how evenly they split the square before spending any CSP call on them, and counted CSP calls as its budget; it scored 52.42 on the same held-out 50 (best-known beaten on 39 of 50). What evolution added on top: shapes are raced as *resumable* arms, so a shape that earns more budget later continues where it stopped instead of starting over; the pool is cut by successive halving; the search widens to neighbouring $(R, M)$ when the pool runs dry; a non-uniform arm lets the outer boxes carry different numbers of rectangles (via `equalize_weighted`); and candidate shapes are ordered by their measured quality in an earlier survey.
+
+The budget is a *count* of CSP calls, not a wall-clock allowance, so a result is deterministic: the same $n$, cache and schedule give the same dissection on any machine, as long as `--timeout` does not cut the search short first.
+
+With `--schedule best` at 240 s per $n$ per schedule, a uniform random sample of 700 values of $n$ in $300 \ldots 3000$ beats the best-known value on 597, ties 32 and is worse on 71, and is 7.75 % lower on average. `records/` holds the resulting values and dissections.
+
+
 ### How to use the solver
 
 Before running the solver for the first time, we need to built the cache of suitable rectangle partitions. With default options it takes around 45s of runtime and results in 115MB of data.
@@ -66,9 +85,16 @@ julia -t auto mondrian.jl gen-prime
 
 Useful `init-cache` switches: `--prime-per-k <NUM>` caps how many prime classes are taken per piece count (`0` for all of them), `--expand-prime <NUM>` sets the expansion target per piece count, and `--no-prime` reproduces the old cache without them.
 
+The census values in `records/` were produced with one specific cache (258,064 child topologies, 87,614 of them A340984 primes, and 339 outer roots). `init-cache` draws its random topologies afresh, so a rebuilt cache gives slightly different dissections; to reproduce the records exactly, download `floorplans.cache` and `outer_roots.cache` from this repository's release assets into `data/cache/` instead of running `init-cache`.
+
 Afterwards, finding a heuristic solution for a given $n$, for example $213$ is just:
 ```bash
 julia mondrian.jl 213
+```
+
+To run both evolved schedules and keep the better result (see above):
+```bash
+julia mondrian.jl 213 --schedule best
 ```
 
 You can also supply `--deep` to extend the search caps and find better solutions:
@@ -87,4 +113,4 @@ Finally, you can use `plot.jl` to produce images of the solutions; like the $n =
 
 ### AI Declaration
 
-This README is human-written, and all main ideas for the solver were proposed by humans. GPT 5.6 Sol helped optimizing the concrete implementation, especially the local CSP search and the electrical network generator. Additionally, Gemini 3.8 Flash was used to refactor and clean up code.
+This README is human-written, and all main ideas for the solver were proposed by humans. GPT 5.6 Sol helped optimizing the concrete implementation, especially the local CSP search and the electrical network generator. Additionally, Gemini 3.8 Flash was used to refactor and clean up code. The A340984 prime-rectangulation seeds and the exhaustive enumerator in `enum/` were written with Claude. The decision layer in `src/solver.jl` was evolved by ShinkaEvolve with Claude proposing the programs, and Claude merged the two evolved programs into the single file with a `schedule` switch.

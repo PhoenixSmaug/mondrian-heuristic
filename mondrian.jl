@@ -46,6 +46,7 @@ function print_usage()
     println("Options for solve:")
     println("  --timeout <sec>            Total time limit in seconds (default: none / unlimited)")
     println("  --deep                     Perform deep 5-minute/config hierarchical search")
+    println("  --schedule <S>             bandit (default), race, or best = run both, keep lower defect")
     println("  --output <file>            Output JSON path (default: solutions.json)")
 end
 
@@ -299,7 +300,8 @@ function run_solve(targets::Vector{Int};
                    timeout::Float64                    = Inf,
                    deep::Bool                          = false,
                    output_path::Union{String, Nothing} = nothing,
-                   cache_dir::String                   = joinpath("data", "cache"))
+                   cache_dir::String                   = joinpath("data", "cache"),
+                   schedule::Symbol                    = :bandit)
 
     lib_path  = joinpath(cache_dir, "floorplans.cache")
     root_path = joinpath(cache_dir, "outer_roots.cache")
@@ -320,6 +322,7 @@ function run_solve(targets::Vector{Int};
     println("  Target(s)    : $(targets[1])$(length(targets) > 1 ? " .. $(targets[end])" : "")")
     println("  Mode         : $depth_str")
     println("  Timeout      : $timeout_str")
+    println("  Schedule     : $schedule")
     println("  Output File  : $out_file (consolidated, keeps best)")
     println("==================================================\n")
 
@@ -359,8 +362,9 @@ function run_solve(targets::Vector{Int};
         end
 
         sol = try
-            solve(n; library=library, outer_roots=roots, timeout=timeout, deep=deep,
+            kw = (library=library, outer_roots=roots, timeout=timeout, deep=deep,
                   on_update=on_update, on_config_start=on_config_start, on_step_progress=on_step_progress)
+            schedule === :best ? solve_best(n; kw...) : solve(n; kw..., schedule=schedule)
         catch e
             if e isa InterruptException
                 is_interactive && println()
@@ -467,6 +471,7 @@ function main(args::Vector{String}=ARGS)
     deep        = false
     output_path = nothing
     cache_dir   = joinpath("data", "cache")
+    schedule    = :bandit
 
     i = 1
     while i <= length(args)
@@ -476,6 +481,8 @@ function main(args::Vector{String}=ARGS)
         elseif arg == "--deep"; deep = true
         elseif arg == "--output"; i += 1; output_path = args[i]
         elseif arg == "--cache-dir"; i += 1; cache_dir = args[i]
+        elseif arg == "--schedule"; i += 1; schedule = Symbol(args[i])
+            schedule in (:bandit, :race, :best) || (println(stderr, "Error: --schedule must be bandit, race or best."); return 1)
         elseif tryparse(Int, arg) !== nothing; push!(targets, parse(Int, arg))
         else; println(stderr, "Unknown argument: ", arg); return 1
         end
@@ -485,7 +492,8 @@ function main(args::Vector{String}=ARGS)
     isempty(targets) && (println(stderr, "Error: Specify grid size N."); return 1)
 
     target_list = length(targets) == 1 ? targets : collect(targets[1]:targets[2])
-    return run_solve(target_list; timeout=timeout, deep=deep, output_path=output_path, cache_dir=cache_dir)
+    return run_solve(target_list; timeout=timeout, deep=deep, output_path=output_path, cache_dir=cache_dir,
+                     schedule=schedule)
 end
 
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)

@@ -42,6 +42,6 @@ export expand_portfolio_by_k, expand_electrical_portfolio
 export generate_quilt_portfolio, generate_prime_portfolio, interleave
 
 # CSP & Solver Exports
-export instantiate_square, screen_topology, balanced_outer_masks, solve_interval_csp, solve
+export instantiate_square, screen_topology, balanced_outer_masks, solve_interval_csp, solve, solve_best
 
 end # module MondrianSolver
