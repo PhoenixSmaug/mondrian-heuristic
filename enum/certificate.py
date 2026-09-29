@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Rebuild the certificates stored with the A340984 representatives."""
+"""Rebuild the certificates stored with the A340984 representatives.
+
+Copied unmodified from certificate.py in github.com/PhoenixSmaug/OEIS_A340984,
+so that enum_prime.py can de-duplicate on the catalogue's own D4 certificate.
+"""
 
 from __future__ import annotations
 

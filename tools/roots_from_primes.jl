@@ -1,14 +1,18 @@
 #!/usr/bin/env julia
+# EXPERIMENTAL: not used for any result in the README. The output file is
+# read by solve() only when it is called without `outer_roots` (the CLI
+# always passes data/cache/outer_roots.cache).
+#
 # Stock the OUTER ROOT pool with face-share-free templates from the prime
 # catalogue already on disk.
 #
 # A prime rectangulation cannot contain a full-span tile -- the complement of
 # such a tile would itself be a block of k-1 rectangles -- so every prime is
-# face-share-free in the strong sense, boundary included. The repository
-# already holds ~253,000 of them: the complete A340984 catalogue for k <= 14
-# in data/import/a340984, and generated classes for k = 15..20 in
-# data/import/prime_generated.cache. None of it has ever been used as outer
-# root material, where the shipped pool is 339 templates total.
+# face-share-free in the strong sense, boundary included. With the A340984
+# catalogue downloaded into data/import/a340984 (k <= 14) and gen-prime run
+# (k = 15..20, data/import/prime_generated.cache) there are ~253,000 of them.
+# At most 6 per R enter the shipped 339-template outer-root pool; this tool
+# offers many more.
 #
 # These go in as OPTIONS. Nothing here prefers them; the ranking inside
 # solve() decides on merit, and it cannot pick what is absent.

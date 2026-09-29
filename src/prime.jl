@@ -160,16 +160,17 @@ function grow_prime(fp::Floorplan, rng::AbstractRNG;
     cur = equalize(cand)
     cur === nothing && return nothing
 
+    fid = isempty(id) ? "prime_gen_k$(length(cur))" : id
+    is_prime_rectangulation(cur) && return Floorplan(fid, cur.rectangles)
+    # Test AFTER every flip, including the last: testing only before each
+    # flip paid for the final flip and equalization but never looked at it.
     for _ in 1:max_repair
-        if is_prime_rectangulation(cur)
-            fid = isempty(id) ? "prime_gen_k$(length(cur))" : id
-            return Floorplan(fid, cur.rectangles)
-        end
         flips = t_flips(cur)
         isempty(flips) && return nothing
         nxt = equalize(flips[rand(rng, 1:length(flips))])
         nxt === nothing && return nothing
         cur = nxt
+        is_prime_rectangulation(cur) && return Floorplan(fid, cur.rectangles)
     end
     return nothing
 end

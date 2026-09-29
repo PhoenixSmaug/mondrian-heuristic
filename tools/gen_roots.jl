@@ -1,11 +1,15 @@
 #!/usr/bin/env julia
+# EXPERIMENTAL: not used for any result in the README. The output file is
+# read by solve() only when it is called without `outer_roots` (the CLI
+# always passes data/cache/outer_roots.cache).
+#
 # Expand the OUTER ROOT pool -- the templates that split the square into R
 # big boxes at the top of the hierarchy.
 #
-# The shipped pool has 339 templates for R = 2..14, and they are consumed in
-# raw file order: solve() takes avail_roots[1:max_roots] with max_roots = 5
-# for R = 7..10. So the entire top-level split of every large n is chosen
-# from the first five entries of a list nobody ranked.
+# The shipped pool has 339 templates for R = 2..14. (When this tool was
+# written, solve() took them in raw file order, avail_roots[1:max_roots] with
+# max_roots = 5 for R = 7..10; the current solver ranks them first with
+# _rank_roots, but still only among these 339.)
 #
 # The pool is also tiny in absolute terms. The number of rectangulations
 # with R rectangles follows the Baxter numbers -- 24, 116, 642, 3938, 26194,

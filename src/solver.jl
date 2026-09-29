@@ -15,20 +15,22 @@
 # except the scheduler that allocates the CSP-call budget:
 #
 #   schedule = :bandit  successive halving with widening ROLLED INTO the
-#                       halving loop (run_incremental_bandit!). Best single
-#                       program: 55.95 on the evolution set, 55.23 on the
-#                       held-out 50 (beats the published value on 47 of 50).
+#                       halving loop (run_incremental_bandit!). 55.95 on the
+#                       evolution set, 55.23 on the held-out 50 (beats the
+#                       published value on 47 of 50), both at 900 s per n.
 #   schedule = :race    successive halving to one survivor, then widening to
 #                       lattice neighbours only once the pool has exhausted
-#                       its own roots (race_then_widen!). 55.50; wins on about
-#                       a fifth of n where :bandit does not.
+#                       its own roots (race_then_widen!). 55.50 on the
+#                       evolution set; at 240 s per n it beats :bandit on
+#                       more n than the reverse.
 #
 # solve_best(n) runs both and keeps the lower defect -- that is how the
 # census values in records/ were produced.
 #
 # The CSP-call budget is a COUNT, not a wall-clock allowance, so results are
-# deterministic: the same n, library and schedule give the same dissection on
-# any machine as long as `timeout` does not bind first.
+# deterministic as long as `timeout` does not bind first. At 240 s per n it
+# does bind for n above roughly 1,500, and results there depend on machine
+# speed.
 
 
 # ------------------------------------------------------------------------------
@@ -169,6 +171,13 @@ end
 # many children each carries. Wrapped so any failure (missing function,
 # unexpected return type, missing child bucket for a given count) is a
 # clean no-op -- this can only ever ADD a reachable candidate.
+#
+# KNOWN ISSUE, kept on purpose: equalize_weighted only has a Vector{Int}
+# method, so the Float64.(weights) call below always throws and the catch
+# returns nothing -- this arm has never been built, in evolution, in the
+# held-out test or in the census. It is left as-is so that this file keeps
+# reproducing the evaluated programs exactly; passing `weights` directly
+# enables it (and changes results).
 function try_make_nonuniform_arm(n::Int, root_template::Topology, r::Int,
                                   children_by_k::Dict{Int, Vector{Topology}}, target_pieces::Float64,
                                   outer_trial_cap::Int, shortlist_cnt::Int, keep_per_child::Int, cands_cap::Int)
@@ -297,8 +306,8 @@ function _arm_tag(a::RaceArm)
     a.weights === nothing ? "hierarchical (R=$(a.r), M=$(a.k))" : "hierarchical-nu (R=$(a.r))"
 end
 # Build fresh arms for the untried lattice neighbours (R+-1, M+-1) of each
-# seed arm, plus (for uniform seeds) one non-uniform sibling arm whose box
-# child-counts are fitted to the target piece count via equalize_weighted.
+# seed arm, plus (for uniform seeds) an attempted non-uniform sibling arm
+# (never built in practice; see try_make_nonuniform_arm).
 # `tried` is mutated in place so no (r,k) pair is ever raced twice.
 function try_widen_from!(seed_arms::Vector{RaceArm}, n::Int,
                           roots_by_r::Dict{Int, Vector{Topology}}, children_by_k::Dict{Int, Vector{Topology}},
@@ -583,6 +592,19 @@ end
 # ------------------------------------------------------------------------------
 # 6. Entry points
 # ------------------------------------------------------------------------------
+"""
+    solve(n; [library], [outer_roots], [timeout=Inf], [deep=false], [on_update], [on_config_start], [on_step_progress], [schedule=:bandit])
+
+Find a low-defect dissection of the n x n square with the evolved decision
+layer. The search is bounded by a COUNT of CSP calls (100, or 3600 with
+`deep`), so without a binding `timeout` the result is deterministic.
+`timeout` is checked between CSP calls, not inside one, so a run can overrun
+it by one call. If `outer_roots` is empty the roots are read from
+`data/cache/outer_roots_expanded.cache` when that file exists, else from
+`data/cache/outer_roots.cache`. `schedule` picks the budget scheduler
+(`:bandit` or `:race`, see the file header). For `n >= 180` the
+`on_config_start` / `on_step_progress` callbacks are not called.
+"""
 function solve(n::Int;
                library::Vector{Floorplan} = Floorplan[],
                outer_roots::Vector{Floorplan} = Floorplan[],
@@ -717,6 +739,8 @@ about twice as long as a single `solve`. This is how the census values in
 `records/` were produced.
 """
 function solve_best(n::Int; kwargs...)::Union{Solution, Nothing}
+    haskey(kwargs, :schedule) &&
+        throw(ArgumentError("solve_best runs both schedules; call solve(n; schedule=...) for one"))
     best = nothing
     for schedule in (:bandit, :race)
         sol = solve(n; kwargs..., schedule = schedule)

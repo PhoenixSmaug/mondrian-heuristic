@@ -199,6 +199,10 @@ static Key canonical_key(const Rect *r, int k, int W, int H) {
 /* ---------- primality --------------------------------------------------- */
 
 static int has_block(const Rect *r, int k, int W, int H) {
+    /* A block is 2..k-1 pieces, so none exists below k = 3. Without this
+     * guard the two halves of the k = 2 split share a full face and are
+     * reported as a block, giving a(2) = 0 instead of 1. */
+    if (k < 3) return 0;
     for (int i = 0; i < k; i++)
         for (int j = 0; j < i; j++) {
             const Rect *a = &r[i], *b = &r[j];

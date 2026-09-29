@@ -1,4 +1,7 @@
 #!/usr/bin/env julia
+# EXPERIMENTAL: not used for any result in the README. Writes
+# data/import/nfs_generated.cache, which nothing else reads.
+#
 # Generate NON-FACE-SHARING rectangulations and measure the class.
 #
 # A rectangulation is face-share-free when no two of its rectangles are flush
@@ -63,7 +66,8 @@ function grow_nfs(fp::Floorplan, rng::AbstractRNG; max_repair::Int=4)
         nxt === nothing && return nothing
         cur = nxt
     end
-    return nothing
+    # Also test the state after the final flip, which the loop never checks.
+    return is_face_share_free(cur) ? Floorplan("nfs_k$(length(cur))", cur.rectangles) : nothing
 end
 
 function generate_level(pool::Vector{Floorplan}, target::Int;

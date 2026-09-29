@@ -44,8 +44,8 @@ function print_usage()
     println("  --import-dir <dir>         Seed import directory (default: data/import)")
     println()
     println("Options for solve:")
-    println("  --timeout <sec>            Total time limit in seconds (default: none / unlimited)")
-    println("  --deep                     Perform deep 5-minute/config hierarchical search")
+    println("  --timeout <sec>            Time limit per schedule, checked between CSP calls (default: none)")
+    println("  --deep                     Larger search: 3600 CSP calls and 24 shapes instead of 100 and 16")
     println("  --schedule <S>             bandit (default), race, or best = run both, keep lower defect")
     println("  --output <file>            Output JSON path (default: solutions.json)")
 end
@@ -315,7 +315,7 @@ function run_solve(targets::Vector{Int};
 
     out_file = output_path === nothing ? "solutions.json" : output_path
     timeout_str = isfinite(timeout) ? "$(timeout)s" : "none"
-    depth_str   = deep ? "DEEP (5 min/config)" : "standard (1 min/config)"
+    depth_str   = deep ? "deep (3600 CSP calls)" : "standard (100 CSP calls)"
 
     println("==================================================")
     println("  Mondrian Art Problem Solver")
@@ -435,7 +435,7 @@ function main(args::Vector{String}=ARGS)
         expand_prime       = 8000
         prime_per_k        = 8000
         prime_dir          = nothing
-        generated_path     = joinpath("data", "import", "prime_generated.cache")
+        generated_path     = nothing   # default <import-dir>/prime_generated.cache, resolved below
         use_prime          = true
 
         i = 2
@@ -459,6 +459,7 @@ function main(args::Vector{String}=ARGS)
             end
             i += 1
         end
+        generated_path === nothing && (generated_path = joinpath(import_dir, "prime_generated.cache"))
         run_init_cache(; import_dir=import_dir, cache_dir=cache_dir,
                          expand_electrical=expand_electrical, expand_quilts=expand_quilts,
                          expand_prime=expand_prime, prime_per_k=prime_per_k,
