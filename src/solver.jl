@@ -27,6 +27,13 @@
 # solve_best(n) runs both and keeps the lower defect -- that is how the
 # census values in records/ were produced.
 #
+# The evolved programs sent n < 180 to a separate sequential search over a
+# short fixed list of shapes. On the census that lost to the best-known value
+# on every n it covered (about 45 % worse on average), while the same search
+# as for larger n was better on 89 of 90 of those n, so the switch has been
+# removed: every n now runs the same search. For n >= 180 this file is
+# unchanged by that and reproduces the evaluated programs exactly.
+#
 # The CSP-call budget is a COUNT, not a wall-clock allowance, so results are
 # deterministic as long as `timeout` does not bind first. At 240 s per n it
 # does bind for n above roughly 1,500, and results there depend on machine
@@ -39,12 +46,6 @@
 
 function recommended_configs(n::Int; deep::Bool=false)
     target = 2.895 * (float(n) ^ 0.472)
-    if n < 80
-        return [(1, k) for k in 8:14]
-    elseif n < 180
-        return vcat([(1, k) for k in 11:15], [(2, k) for k in 10:13],
-                    [(3, 10), (3, 11), (3, 12)])
-    end
     # Measured mean %-below-trend per (R, M) from the 684-n survey. Used
     # only to ORDER the racing pool below -- not to pick a winner.
     quality_table = Dict{Tuple{Int,Int}, Float64}(
@@ -495,74 +496,9 @@ function race_then_widen!(arms::Vector{RaceArm}, n::Int,
 end
 
 # ------------------------------------------------------------------------------
-# 5. Small n (< 180) and the last-resort fallback
+# 5. Last-resort fallback
 # ------------------------------------------------------------------------------
 
-# Rank this root's own outer-boxes by area-spread (cheap, no CSP call), then
-# spend up to `call_budget` CSP calls exploring its best roots/masks under
-# the given breadth caps. Used only by the small-n (< 180) legacy walk,
-# which is a short curated list rather than a wide race, so it is left as
-# a plain one-shot sweep. Returns (best_defect_seen, calls_used, perfect).
-function attempt_hierarchical_config(n::Int, r::Int, k::Int,
-                                      roots_by_r::Dict{Int, Vector{Topology}},
-                                      children_by_k::Dict{Int, Vector{Topology}},
-                                      call_budget::Int,
-                                      max_roots::Int, outer_trial_cap::Int,
-                                      shortlist_cnt::Int, keep_per_child::Int, cands_cap::Int,
-                                      get_cap::Function, record_solution::Function)
-    (haskey(roots_by_r, r) && haskey(children_by_k, k)) || return (Inf, 0, false)
-    avail_roots = roots_by_r[r]
-    avail_children = children_by_k[k]
-    (isempty(avail_roots) || isempty(avail_children) || call_budget <= 0) && return (Inf, 0, false)
-    target_area = (n * n) / Float64(r * k)
-    box_cache = Dict{Tuple{Int,Int}, Vector{LocalBoxCandidate}}()
-    ranked_roots = _rank_roots(avail_roots, n, max_roots)
-    calls_used = 0
-    best_defect_here = Inf
-    for root in ranked_roots
-        calls_used >= call_budget && break
-        balanced_masks = balanced_outer_masks(root, n; keep=16)
-        candidate_outer_masks = Tuple{Int, Int, Int, Vector{IntRect}, Vector{Vector{LocalBoxCandidate}}}[]
-        for (box_defect, mask, boxes) in balanced_masks
-            groups = Vector{Vector{LocalBoxCandidate}}()
-            all_viable = true
-            for b in boxes
-                bw, bh = b[3] - b[1], b[4] - b[2]
-                cands = get_cached_box_candidates(avail_children, bw, bh, target_area, box_cache;
-                                                  shortlist_count=shortlist_cnt,
-                                                  keep_per_child=keep_per_child,
-                                                  cands_cap=cands_cap)
-                if isempty(cands)
-                    all_viable = false
-                    break
-                end
-                push!(groups, cands)
-            end
-            all_viable || continue
-            approx_defect = maximum(g[1].max_area for g in groups) - minimum(g[1].min_area for g in groups)
-            push!(candidate_outer_masks, (approx_defect, box_defect, mask, boxes, groups))
-        end
-        sort!(candidate_outer_masks, by=x -> (x[1], x[2]))
-        trials = candidate_outer_masks[1:min(length(candidate_outer_masks), outer_trial_cap)]
-        for (approx_d, _box_d, mask, boxes, groups) in trials
-            calls_used >= call_budget && break
-            best_defect_here = min(best_defect_here, Float64(approx_d))
-            current_cap = get_cap()
-            approx_d >= current_cap && continue
-            calls_used += 1
-            tiling = solve_interval_csp(groups, boxes; best_defect_cap=current_cap, time_limit_sec=1.0e9)
-            if tiling !== nothing
-                d = validate_solution(n, tiling)
-                if d !== nothing
-                    best_defect_here = min(best_defect_here, Float64(d))
-                    record_solution(Solution(n, d, tiling, "hierarchical (R=$r, M=$k)"))
-                    d == 0 && return (0.0, calls_used, true)
-                end
-            end
-        end
-    end
-    return (best_defect_here, calls_used, false)
-end
 # Last-resort, budget-free safety net: if the race produced nothing at all
 # (rare, but a total miss scores zero for this n), try a handful of
 # single-level topologies near the fitted piece-count target.
@@ -602,8 +538,8 @@ layer. The search is bounded by a COUNT of CSP calls (100, or 3600 with
 it by one call. If `outer_roots` is empty the roots are read from
 `data/cache/outer_roots_expanded.cache` when that file exists, else from
 `data/cache/outer_roots.cache`. `schedule` picks the budget scheduler
-(`:bandit` or `:race`, see the file header). For `n >= 180` the
-`on_config_start` / `on_step_progress` callbacks are not called.
+(`:bandit` or `:race`, see the file header). The `on_config_start` /
+`on_step_progress` callbacks are accepted for compatibility but not called.
 """
 function solve(n::Int;
                library::Vector{Floorplan} = Floorplan[],
@@ -640,64 +576,7 @@ function solve(n::Int;
         end
     end
     get_cap() = best_solution === nothing ? typemax(Int) : best_solution.defect
-    if n < 180
-        # Sequential walk over a short curated config list. The two
-        # schedules differ only in how an R >= 2 config is explored.
-        configs = recommended_configs(n; deep=deep)
-        csp_budget_per_config = deep ? 1200 : 65
-        csp_budget_total      = deep ? 3600 : 100
-        csp_total = 0
-        config_time_cap = deep ? 300.0 : 60.0
-        for (c_idx, (r, k)) in enumerate(configs)
-            has_timeout && (time() - start_time > timeout) && break
-            csp_calls = 0
-            (csp_total >= csp_budget_total) && break
-            best_str = best_solution === nothing ? "none" : string(best_solution.defect)
-            on_config_start !== nothing && on_config_start(c_idx, length(configs), r, k, r * k, best_str, round(Int, config_time_cap))
-            if r == 1
-                haskey(children_by_k, k) || continue
-                tops = children_by_k[k]
-                for (t_idx, top) in enumerate(tops)
-                    has_timeout && (time() - start_time > timeout) && break
-                    (csp_calls >= csp_budget_per_config || csp_total >= csp_budget_total) && break
-                    csp_calls += 1
-                    csp_total += 1
-                    defect, _, rects = screen_topology(top, n; max_samples=128)
-                    if defect !== nothing
-                        d = validate_solution(n, rects)
-                        if d !== nothing
-                            record_solution(Solution(n, d, rects, "single-level ($(top.id))"))
-                            d == 0 && return best_solution
-                        end
-                    end
-                    on_step_progress !== nothing && on_step_progress(t_idx, length(tops), 1, 1, 1, 1, time() - start_time, round(Int, config_time_cap), best_solution === nothing ? typemax(Int) : best_solution.defect)
-                end
-            else
-                budget_left = min(csp_budget_per_config, csp_budget_total - csp_total)
-                max_roots       = r >= 3 ? 8 : 10
-                outer_trial_cap = r >= 3 ? 4 : 5
-                if schedule === :race
-                    arm = make_arm(n, r, k, roots_by_r, children_by_k;
-                                   max_roots = max_roots, outer_trial_cap = outer_trial_cap,
-                                   shortlist_cnt = 36, keep_per_child = 6, cands_cap = 48)
-                    if arm !== nothing
-                        calls, perfect = arm_step!(arm, n, children_by_k, budget_left, get_cap, record_solution, _arm_tag(arm))
-                        csp_total += calls
-                        perfect && return best_solution
-                    end
-                else
-                    bdef, used, perfect = attempt_hierarchical_config(n, r, k, roots_by_r, children_by_k,
-                                                                        budget_left, max_roots, outer_trial_cap,
-                                                                        36, 6, 48, get_cap, record_solution)
-                    csp_total += used
-                    perfect && return best_solution
-                end
-            end
-        end
-        best_solution === nothing && fallback_single_level_sweep!(n, children_by_k, record_solution, start_time, has_timeout, timeout)
-        return best_solution
-    end
-    # n >= 180: successive halving over lazy, resumable arms; the schedule
+    # Every n: successive halving over lazy, resumable arms; the schedule
     # decides how the pool is widened (see sections 3 and 4).
     total_budget    = deep ? 3600 : 100
     max_roots       = deep ? 12 : 9

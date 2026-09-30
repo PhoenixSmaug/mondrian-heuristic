@@ -7,7 +7,7 @@ data/import/prime_generated.cache
 data/import/prime_generated_jsonl/
 data/import/nfs_generated.cache
 # Default solver output (written to the working directory)
-solutions.json
+/solutions.json
 # Build artefacts
 enum/enum_prime
 enum/enum_prime.exe
