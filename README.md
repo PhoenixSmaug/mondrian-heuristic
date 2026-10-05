@@ -6,13 +6,15 @@ The Mondrian Art Problem asks us to cut an $n \times n$ square into rectangles w
 
 Optimal values are known only up to $n = 66$, and are listed on OEIS as [A276523](https://oeis.org/A276523). For larger $n$ we can only find *heuristic solutions*: valid partitions found by search, with no proof that a smaller defect is impossible. A heuristic solution therefore gives an upper bound on $M(n)$, not its exact value. In 2016 Ed Pegg Jr published heuristic solutions up to $n = 900$ [on Wolfram Demonstrations](https://demonstrations.wolfram.com/MondrianArtProblem/) (his solution for $n = 196$ is in fact invalid, since it uses the rectangle $26 \times 98$ twice); as far as we know, the code behind them is not public.
 
-This repository presents a Julia solver that finds lower defects across the board:
+This repository presents a Julia solver. Its original version already finds lower defects than Ed's across the board:
 
 ![Record Comparison](img/record-comparison.png)
 
-It also extends heuristic solutions to $n = 3000$ and beyond:
+The optimized version described below (with `--schedule best` at 240 s per $n$) improves on the original solver's values for 2338 of the 2934 values of $n$ from 67 to 3000, by 6.9% on average from $n = 300$ up; most of the $n$ it does not improve lie below 800:
 
-![Range Extension](img/range-extension.png)
+![Census against the original solver](img/census.png)
+
+These values and their partitions, each re-verified by an independent checker, are in `records/`: `values.txt` is the table with every improvement applied, `solutions.json` holds the improved partitions, `census.jsonl` gives both schedules' defects for every $n$, and `non_beats.csv` lists the $n$ that are tied or not improved. At 240 s per $n$ the timeout cuts the search short for $n$ above roughly 1500, so those values understate what the solver finds with more time.
 
 As an example, here is the solution it finds for $n = 2000$:
 
@@ -32,7 +34,7 @@ Slicing trees, quilt substitutions and, to a lesser extent, electrical networks 
 
 Prime partitions are exactly the ones the other generators cannot produce by construction, which makes them the natural missing family of seeds. They also matter for this problem in particular: two rectangles that share a complete side have their side lengths locked together, and that is precisely the rigidity a low-defect solution needs to avoid.
 
-The complete catalogue up to $k = 14$ is not included in this repository (about 81 MB). Download `representatives_n1.jsonl` to `representatives_n14.jsonl` from [OEIS_A340984](https://github.com/PhoenixSmaug/OEIS_A340984) into `data/import/a340984/`. The function `parse_a340984` in `src/io.jl` reads them and normalizes each drawing onto the unit square, and `src/prime.jl` can test any partition for primality (`is_prime_rectangulation`) and grow new ones.
+The complete catalogue up to $k = 14$ is not included in this repository (about 81 MB). Download `representatives_n1.jsonl` to `representatives_n14.jsonl` from [OEIS_A340984](https://github.com/meghanto/OEIS_A340984) into `data/import/a340984/`. The function `parse_a340984` in `src/io.jl` reads them and normalizes each drawing onto the unit square, and `src/prime.jl` can test any partition for primality (`is_prime_rectangulation`) and grow new ones.
 
 Above $k = 14$ there is no catalogue, so the solver generates prime partitions itself. Splitting one rectangle of a prime partition in two always creates a block, so the split is followed by a short random walk of T-flips, re-equalizing after each move, until the block is gone; about 6% of attempts give a prime partition with one more rectangle. Each generated level becomes the parent pool for the next:
 
@@ -67,35 +69,6 @@ Two evolved programs are kept because they win on different $n$. They share all 
 Evolution started from our earlier rewrite of `solver.jl`, which scored 52.42 on the same held-out values (39 of 50 beaten). That rewrite already chose shapes near a fitted piece-count law of about $2.895\,n^{0.472}$ rectangles, ranked outer roots by how evenly they split the square before spending any call on them, and counted CSP calls as its budget. Evolution added the resumable arms, successive halving, the widening to neighbouring shapes, and an ordering of shapes by their measured quality in an earlier survey. The evolved code also contains a non-uniform arm that never runs, because it calls `equalize_weighted` with floating-point weights, for which there is no method; we leave it in so that the file reproduces the evaluated programs exactly.
 
 Because the budget is a count of calls, a result is deterministic as long as `--timeout` does not cut the search short. At 240 s per $n$ the timeout does cut it short for $n$ above roughly 1500, where results then depend on the speed of the machine. Even at 900 s it can at the largest $n$: with `race`, the value $n = 2713$ gave 265 in one run and 280 in another.
-
-### Results
-
-With `--schedule best --timeout 240` we ran every $n$ from 300 to 3000. Of these 2701 values the best-known one is beaten on 2311, tied on 110 and not reached on 280, and the defect is 6.9% lower on average. Almost every value not beaten lies below $n = 800$; from $n = 1200$ on, only 27 of 1801 are. On its own, `race` is better than `bandit` on 581 values of $n$ and worse on 314.
-
-![Census against the best-known values](img/census.png)
-
-The directory `records/` holds the result for every $n$ from 67 to 3000, each re-verified by an independent checker. The file `values.txt` is the best-known table with our value wherever it is lower (2338 values), `solutions.json` holds those partitions in the solver's corner format, `census.jsonl` gives both schedules' defects for every $n$, and `non_beats.csv` lists the 486 values $n \ge 180$ that we tie or lose, with the gaps and the tile counts of both partitions.
-
-### What we tried
-
-The table lists the main changes we measured, in score points on the 50-point scale above. The first three were measured while building the starting layer; the others were measured against the evolved program on the 30-value evolution set, where it scores 55.95.
-
-| Change | Result | Score change |
-|---|---|---|
-| Choose the number of rectangles from the fitted law $2.895\,n^{0.472}$ | kept | +2.5 |
-| Count CSP calls instead of wall-clock time | kept, and makes runs repeatable | +1.9 |
-| Rank outer roots by how evenly they split the square, try the best 10 to 12 | kept | +0.67 |
-| Resumable arms, successive halving and widening (evolved) | kept | held-out 52.42 to 55.23 |
-| Re-equalize each outer box for its own aspect ratio | failed | −1.19 |
-| Add a third level of hierarchy | failed | −1.13 |
-| Replace the quality-ordered shape list with a prior-free scorer | failed | −0.92 |
-| Rewrite the search as a genetic algorithm | failed | −0.99 |
-| Try a ladder of CSP slack windows | failed | −1.45 |
-| Non-uniform arm, letting outer boxes hold different numbers of rectangles: in the evolved code it never ran (it passes floating-point weights to `equalize_weighted`); switched on with integer weights | failed when on: never the winner on any of the 30 values | −0.13 |
-| Keep topologies that cannot be equalized exactly, or grow children past $M = 18$ | no effect: never selected on any of the 30 values | 0 |
-| Admit shapes with as few as 0.2 times the law's rectangles | no effect: never selected; held-out 55.17 and 54.88 against 55.23 | 0 |
-| Few-tile constructions like the best-known values at $n = 324$, 406 and 526, which use 0.23 to 0.33 times the law | untried | |
-| Allow $R$ above 14 for $n$ well beyond 3000 (at $n \approx 7000$ the cap holds us to 0.93 times the law) | untried | |
 
 ### How to use the solver
 
