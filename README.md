@@ -6,15 +6,11 @@ The Mondrian Art Problem asks us to cut an $n \times n$ square into rectangles w
 
 Optimal values are known only up to $n = 66$, and are listed on OEIS as [A276523](https://oeis.org/A276523). For larger $n$ we can only find *heuristic solutions*: valid partitions found by search, with no proof that a smaller defect is impossible. A heuristic solution therefore gives an upper bound on $M(n)$, not its exact value. In 2016 Ed Pegg Jr published heuristic solutions up to $n = 900$ [on Wolfram Demonstrations](https://demonstrations.wolfram.com/MondrianArtProblem/) (his solution for $n = 196$ is in fact invalid, since it uses the rectangle $26 \times 98$ twice); as far as we know, the code behind them is not public.
 
-This repository presents a Julia solver. Its original version already finds lower defects than Ed's across the board:
+This repository presents a Julia solver that finds lower defects than Ed's across the board and extends heuristic solutions to $n = 3000$ and beyond:
 
-![Record Comparison](img/record-comparison.png)
+![Ed Pegg Jr and this solver](img/census.png)
 
-The optimized version described below (with `--schedule best` at 240 s per $n$) improves on the original solver's values for 2338 of the 2934 values of $n$ from 67 to 3000, by 6.9% on average from $n = 300$ up; most of the $n$ it does not improve lie below 800:
-
-![Census against the original solver](img/census.png)
-
-These values and their partitions, each re-verified by an independent checker, are in `records/`: `values.txt` is the table with every improvement applied, `solutions.json` holds the improved partitions, `census.jsonl` gives both schedules' defects for every $n$, and `non_beats.csv` lists the $n$ that are tied or not improved. At 240 s per $n$ the timeout cuts the search short for $n$ above roughly 1500, so those values understate what the solver finds with more time.
+The values in this graph and their partitions, each re-verified by an independent checker, are in `records/`: `values.txt` lists the best defect for every $n$ up to 3000, `solutions.json` holds the partitions found by the current version, and `census.jsonl` gives, for every $n$ from 67 to 3000, the defect found by each of its two schedules. Those runs used 240 s per $n$, at which the timeout cuts the search short for $n$ above roughly 1500, so the large-$n$ values understate what the solver finds with more time.
 
 As an example, here is the solution it finds for $n = 2000$:
 
@@ -34,7 +30,7 @@ Slicing trees, quilt substitutions and, to a lesser extent, electrical networks 
 
 Prime partitions are exactly the ones the other generators cannot produce by construction, which makes them the natural missing family of seeds. They also matter for this problem in particular: two rectangles that share a complete side have their side lengths locked together, and that is precisely the rigidity a low-defect solution needs to avoid.
 
-The complete catalogue up to $k = 14$ is not included in this repository (about 81 MB). Download `representatives_n1.jsonl` to `representatives_n14.jsonl` from [OEIS_A340984](https://github.com/meghanto/OEIS_A340984) into `data/import/a340984/`. The function `parse_a340984` in `src/io.jl` reads them and normalizes each drawing onto the unit square, and `src/prime.jl` can test any partition for primality (`is_prime_rectangulation`) and grow new ones.
+The complete catalogue up to $k = 14$, the files `representatives_n1.jsonl` to `representatives_n14.jsonl` from [meghanto/OEIS_A340984](https://github.com/meghanto/OEIS_A340984), is included compressed as `data/import/a340984.tar.xz` (3 MB instead of 81 MB). The function `parse_a340984` in `src/io.jl` reads them and normalizes each drawing onto the unit square, and `src/prime.jl` can test any partition for primality (`is_prime_rectangulation`) and grow new ones.
 
 Above $k = 14$ there is no catalogue, so the solver generates prime partitions itself. Splitting one rectangle of a prime partition in two always creates a block, so the split is followed by a short random walk of T-flips, re-equalizing after each move, until the block is gone; about 6% of attempts give a prime partition with one more rectangle. Each generated level becomes the parent pool for the next:
 
@@ -72,7 +68,12 @@ Because the budget is a count of calls, a result is deterministic as long as `--
 
 ### How to use the solver
 
-Before the first run, download the A340984 catalogue (see above) and build the cache of rectangle partitions. With the default options this takes about 45 s and produces 115 MB of data. To include the generated prime partitions above $k = 14$, run the generator first; the cache builder then finds its output on its own:
+Before the first run, unpack the A340984 catalogue and build the cache of rectangle partitions:
+```bash
+tar -xJf data/import/a340984.tar.xz -C data/import
+```
+
+Building the cache with the default options takes about 45 s and produces 115 MB of data. To include the generated prime partitions above $k = 14$, run the generator first; the cache builder then finds its output on its own:
 ```bash
 julia -t auto mondrian.jl gen-prime
 julia mondrian.jl init-cache
