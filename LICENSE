@@ -19,3 +19,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This license does not cover data/import/a340984.tar.xz, which contains the
+representative files of https://github.com/meghanto/OEIS_A340984, or
+enum/certificate.py, which is copied from the same repository. Both remain
+under the terms of their original authors.

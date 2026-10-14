@@ -1,0 +1,14 @@
+# Generated or downloaded data -- too large for git. See the README: the
+# A340984 catalogue comes from github.com/PhoenixSmaug/OEIS_A340984 and the
+# exact caches used for the records are release assets.
+data/cache/
+data/import/a340984/
+data/import/prime_generated.cache
+data/import/prime_generated_jsonl/
+data/import/nfs_generated.cache
+# Default solver output (written to the working directory)
+/solutions.json
+# Build artefacts
+enum/enum_prime
+enum/enum_prime.exe
+__pycache__/
